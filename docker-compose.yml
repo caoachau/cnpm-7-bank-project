@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  # Cấu hình cho Server
+  backend-server:
+    build: ./api
+    ports:
+      - "5000:5000" # Máy thật 5000 -> Container 5000
+    restart: always
+
+  # Cấu hình cho Client
+  frontend-client:
+    build: ./app  # Thay đổi đường dẫn này đúng với thư mục chứa index.html của bạn
+    ports:
+      - "3000:80"   # Máy thật 3000 -> Container 80 (Nginx)
+    restart: always
