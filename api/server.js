@@ -1,225 +1,137 @@
-const express = require('express');
-const bodyParser = require('body-parser');
-const cors = require('cors')
-const crypto = require('crypto');
-const pkg = require('./package.json');
+const express = require("express");
+const bodyParser = require("body-parser");
+const cors = require("cors");
+const mongoose = require("mongoose");
+const crypto = require("crypto");
+const pkg = require("./package.json");
+const Account = require("./models/Account");
 
 // App constants
 const port = process.env.PORT || 5000;
-const apiPrefix = '/api';
+const apiPrefix = "/api";
 
-// Store data in-memory, not suited for production use!
-const db = {
-  test: {
-    user: 'test',
-    currency: '$',
-    description: `Test account`,
-    balance: 75,
-    transactions: [
-      { id: '1', date: '2020-10-01', object: 'Pocket money', amount: 50 },
-      { id: '2', date: '2020-10-03', object: 'Book', amount: -10 },
-      { id: '3', date: '2020-10-04', object: 'Sandwich', amount: -5 }
-    ],
-  },
-  CiaCi: {
-    user: 'CiaCi',
-    currency: '$',
-    description: `Chau's Account`,
-    balance: 100,
-     transactions: [
-      { id: '1', date: '2026-04-29', object: 'Travel', amount: 50 },
-      { id: '2', date: '2026-04-23', object: 'Fried Chicken', amount: -10 },
-      { id: '3', date: '2026-04-22', object: 'Hom qua em tuyet lam', amount: -5 }
-    ],
-  },
+// MongoDB connection
+mongoose.connect("mongodb://mongo:27017/budget")
+  .then(() => console.log("✅ Connected to MongoDB"))
+  .catch((err) => console.error("MongoDB connection error:", err));
 
-};
-
-// Create the Express app & setup middlewares
+// Create Express app
 const app = express();
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
-app.use(cors({ origin: /http:\/\/(127(\.\d){3}|localhost)/}));
-app.options('*', cors());
+app.use(cors({ origin: /http:\/\/(127(\.\d){3}|localhost)/ }));
+app.options("*", cors());
 
-// ***************************************************************************
-
-// Configure routes
+// Router setup
 const router = express.Router();
 
-// Get server infos
-router.get('/all-data', (req, res) => {
-  return res.json(db);
+// Info route
+router.get("/", (req, res) => {
+  res.send(`${pkg.description} v${pkg.version}`);
 });
 
-// ----------------------------------------------
+// Create account
+router.post("/accounts", async (req, res) => {
+  const { user, currency, description, balance } = req.body;
 
-// Create an account
-router.post('/accounts', (req, res) => {
-  // Check mandatory request parameters
-  if (!req.body.user || !req.body.currency) {
-    return res.status(400).json({ error: 'Missing parameters' });
+  if (!user || !currency) {
+    return res.status(400).json({ error: "Missing parameters" });
   }
 
-  // Check if account already exists
-  if (db[req.body.user]) {
-    return res.status(409).json({ error: 'User already exists' });
+  const exists = await Account.findOne({ user });
+  if (exists) {
+    return res.status(409).json({ error: "User already exists" });
   }
 
-  // Convert balance to number if needed
-  let balance = req.body.balance;
-  if (balance && typeof balance !== 'number') {
-    balance = parseFloat(balance);
-    if (isNaN(balance)) {
-      return res.status(400).json({ error: 'Balance must be a number' });  
-    }
-  }
-
-  // Create account
-  const account = {
-    user: req.body.user,
-    currency: req.body.currency,
-    description: req.body.description || `${req.body.user}'s budget`,
-    balance: balance || 0,
+  const acc = new Account({
+    user,
+    currency,
+    description: description || `${user}'s budget`,
+    balance: typeof balance === "number" ? balance : parseFloat(balance) || 0,
     transactions: [],
-  };
-  db[req.body.user] = account;
+  });
 
-  return res.status(201).json(account);
+  await acc.save();
+  res.status(201).json(acc);
 });
 
-// ----------------------------------------------
-
-// Get all data for the specified account
-router.get('/accounts/:user', (req, res) => {
-  const account = db[req.params.user];
-
-  // Check if account exists
-  if (!account) {
-    return res.status(404).json({ error: 'User does not exist' });
+// Get account
+router.get("/accounts/:user", async (req, res) => {
+  const acc = await Account.findOne({ user: req.params.user });
+  if (!acc) {
+    return res.status(404).json({ error: "Nhap sai username roi ong oi" });
   }
-
-  return res.json(account);
+  res.json(acc);
 });
 
-// ----------------------------------------------
-
-// Remove specified account
-router.delete('/accounts/:user', (req, res) => {
-  const account = db[req.params.user];
-
-  // Check if account exists
-  if (!account) {
-    return res.status(404).json({ error: 'User does not exist' });
+// Delete account
+router.delete("/accounts/:user", async (req, res) => {
+  const result = await Account.deleteOne({ user: req.params.user });
+  if (result.deletedCount === 0) {
+    return res.status(404).json({ error: "User does not exist" });
   }
-
-  // Removed account
-  delete db[req.params.user];
-
   res.sendStatus(204);
 });
 
-// ----------------------------------------------
+// Add transaction
+router.post("/accounts/:user/transactions", async (req, res) => {
+  const { date, object, amount } = req.body;
+  const user = req.params.user;
 
-// Add a transaction to a specific account
-router.post('/accounts/:user/transactions', (req, res) => {
-  const account = db[req.params.user];
-
-  // Check if account exists
-  if (!account) {
-    return res.status(404).json({ error: 'User does not exist' });
+  if (!date || !object || amount === undefined) {
+    return res.status(400).json({ error: "Missing parameters" });
   }
 
-  // Check mandatory requests parameters
-  if (!req.body.date || !req.body.object || !req.body.amount) {
-    return res.status(400).json({ error: 'Missing parameters' });
+  const acc = await Account.findOne({ user });
+  if (!acc) {
+    return res.status(404).json({ error: "User does not exist" });
   }
 
-  // Convert amount to number if needed
-  let amount = req.body.amount;
-  if (amount && typeof amount !== 'number') {
-    amount = parseFloat(amount);
+  const amt = typeof amount === "number" ? amount : parseFloat(amount);
+  if (isNaN(amt)) {
+    return res.status(400).json({ error: "Amount must be a number" });
   }
 
-  // Check that amount is a valid number
-  if (amount && isNaN(amount)) {
-    return res.status(400).json({ error: 'Amount must be a number' });
-  }
-
-  // Generates an ID for the transaction
   const id = crypto
-    .createHash('md5')
-    .update(req.body.date + req.body.object + req.body.amount)
-    .digest('hex');
+    .createHash("md5")
+    .update(date + object + amt)
+    .digest("hex");
 
-  // Check that transaction does not already exist
-  if (account.transactions.some((transaction) => transaction.id === id)) {
-    return res.status(409).json({ error: 'Transaction already exists' });
+  if (acc.transactions.some(tx => tx.id === id)) {
+    return res.status(409).json({ error: "Transaction already exists" });
   }
 
-  // Add transaction
-  const transaction = {
-    id,
-    date: req.body.date,
-    object: req.body.object,
-    amount,
-  };
-  account.transactions.push(transaction);
+  const transaction = { id, date, object, amount: amt };
+  acc.transactions.push(transaction);
+  acc.balance += amt;
 
-  // Update balance
-  account.balance += transaction.amount;
-
-  return res.status(201).json(transaction);
+  await acc.save();
+  res.status(201).json(transaction);
 });
 
-// ----------------------------------------------
-
-// Remove specified transaction from account
-router.delete('/accounts/:user/transactions/:id', (req, res) => {
-  const account = db[req.params.user];
-
-  // Check if account exists
-  if (!account) {
-    return res.status(404).json({ error: 'User does not exist' });
+// Delete transaction
+router.delete("/accounts/:user/transactions/:id", async (req, res) => {
+  const acc = await Account.findOne({ user: req.params.user });
+  if (!acc) {
+    return res.status(404).json({ error: "User does not exist" });
   }
 
-  const transactionIndex = account.transactions.findIndex(
-    (transaction) => transaction.id === req.params.id
-  );
-
-  // Check if transaction exists
-  if (transactionIndex === -1) {
-    return res.status(404).json({ error: 'Transaction does not exist' });
+  const index = acc.transactions.findIndex(tx => tx.id === req.params.id);
+  if (index === -1) {
+    return res.status(404).json({ error: "Transaction does not exist" });
   }
 
-  // Remove transaction
-  account.transactions.splice(transactionIndex, 1);
+  const removed = acc.transactions.splice(index, 1)[0];
+  acc.balance -= removed.amount;
 
+  await acc.save();
   res.sendStatus(204);
 });
 
-// Cập nhật toàn bộ thông tin tài khoản
-router.put('/accounts/:user', (req, res) => {
-  const account = db[req.params.user];
-
-  if (!account) {
-    return res.status(404).json({ error: 'User does not exist' });
-  }
-
-  // Cập nhật các trường dữ liệu từ body gửi lên
-  // Nếu không gửi trường đó, nó sẽ lấy giá trị cũ
-  account.currency = req.body.currency || account.currency;
-  account.description = req.body.description || account.description;
-  account.balance = req.body.balance !== undefined ? parseFloat(req.body.balance) : account.balance;
-
-  return res.json(account);
-});
-// ***************************************************************************
-
-// Add 'api` prefix to all routes
+// Add API prefix
 app.use(apiPrefix, router);
 
-// Start the server
+// Start server
 app.listen(port, () => {
-  console.log(`Server listening on port ${port}`);
+  console.log(`🚀 Server listening on port ${port}`);
 });
