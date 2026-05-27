@@ -1,44 +1,24 @@
-#version: '3.8'
-
-#services:
-  # Cấu hình cho Server
-  #backend-server:
-   # build: ./api
-   # ports:
-   #   - "5000:5000" # Máy thật 5000 -> Container 5000
-    #restart: always
-
-  # Cấu hình cho Client
-  #frontend-client:
-  #  build: ./app  # Thay đổi đường dẫn này đúng với thư mục chứa index.html của bạn
- #   ports:
-#      - "3000:80"   # Máy thật 3000 -> Container 80 (Nginx)
-#    restart: always
 version: "3"
 services:
   app:
     build: ./api
     ports:
       - "5000:5000"
-    environment:
-      - PORT=5000
-      - MONGO_URL=mongodb://mongo:27017/mydb  # Cập nhật URI nếu backend dùng Mongo
+    env_file:
+      - .env
     depends_on:
       - mongo
-
   mongo:
     image: mongo:6
     ports:
       - "27017:27017"
     volumes:
       - mongo-data:/data/db
-
   frontend:
     build: ./solution
     ports:
-      - "8080:80"
+      - "3000:80"
     container_name: frontend
     restart: unless-stopped
-
 volumes:
   mongo-data:
